@@ -1,5 +1,5 @@
 // ===============================================================================
-// APEX TITAN v65.7 (ULTIMATE OMNISCIENT MERGE) - HIGH-FREQUENCY ENGINE
+// APEX TITAN v65.8 (STABILIZED & PROTOCOL VALIDATED) - HIGH-FREQUENCY ENGINE
 // ===============================================================================
 
 const cluster = require('cluster');
@@ -12,6 +12,13 @@ require('dotenv').config();
 // --- NOISE SUPPRESSION: Suppresses specific RPC errors to prevent log flooding ---
 process.on('uncaughtException', (err) => {
     const msg = err.message || "";
+    
+    // Catch "Unexpected server response: 200" specifically
+    if (msg.includes('200')) {
+        console.error("\n\x1b[31m[PROTOCOL ERROR] Unexpected Response 200: You are using an HTTP URL in a WSS field. Check ETH_WSS in .env\x1b[0m");
+        return;
+    }
+    
     if (msg.includes('429') || msg.includes('network') || msg.includes('coalesce') || msg.includes('subscribe') || msg.includes('infura')) return; 
     
     if (msg.includes('401')) {
@@ -27,6 +34,7 @@ process.on('uncaughtException', (err) => {
 
 process.on('unhandledRejection', (reason) => {
     const msg = reason?.message || "";
+    if (msg.includes('200')) return; // Suppress redundant WSS-over-HTTP errors
     if (msg.includes('429') || msg.includes('network') || msg.includes('coalesce') || msg.includes('401') || msg.includes('405')) return;
 });
 
@@ -52,31 +60,28 @@ const GLOBAL_CONFIG = {
     TARGET_CONTRACT: process.env.EXECUTOR_CONTRACT || "0x83EF5c401fAa5B9674BAfAcFb089b30bAc67C9A0",
     BENEFICIARY: process.env.BENEFICIARY || "0x4B8251e7c80F910305bb81547e301DcB8A596918",
     
-    // ASSETS
     WETH: "0x4200000000000000000000000000000000000006",
     USDC: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
     CBETH: "0x2Ae3F1Ec7F1F5563a3d161649c025dac7e983970",
 
-    // 🚦 TRAFFIC CONTROL
     MAX_CORES: Math.min(os.cpus().length, 12), 
     WORKER_BOOT_DELAY_MS: 15000, 
     RPC_COOLDOWN_MS: 15000,
     HEARTBEAT_INTERVAL_MS: 120000,
     PORT: process.env.PORT || 8080,
     
-    // 🐋 STRATEGY SETTINGS
     WHALE_THRESHOLD: parseEther("15.0"), 
     LEVIATHAN_MIN_ETH: parseEther("10.0"),
     GAS_LIMIT: 1250000n,
     MARGIN_ETH: "0.015",
-    PRIORITY_BRIBE: 15n, // 15% Tip for non-Mainnet txs
+    PRIORITY_BRIBE: 15n, 
 
     NETWORKS: [
         {
             name: "ETH_MAINNET",
             chainId: 1,
             rpc: process.env.ETH_RPC || "https://rpc.flashbots.net",
-            wss: process.env.ETH_WSS || "wss://mainnet.infura.io/ws/v3/YOUR_KEY", 
+            wss: process.env.ETH_WSS || "wss://ethereum-rpc.publicnode.com", 
             type: "FLASHBOTS",
             relay: "https://relay.flashbots.net",
             uniswapRouter: "0xE592427A0AEce92De3Edee1F18E0157C05861564",
@@ -88,7 +93,7 @@ const GLOBAL_CONFIG = {
             name: "BASE_MAINNET",
             chainId: 8453,
             rpc: process.env.BASE_RPC || "https://mainnet.base.org",
-            wss: process.env.BASE_WSS || "wss://mainnet.base.org",
+            wss: process.env.BASE_WSS || "wss://base-rpc.publicnode.com",
             uniswapRouter: "0x2626664c2603336E57B271c5C0b26F421741e481", 
             priceFeed: "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
             weth: "0x4200000000000000000000000000000000000006",
@@ -111,14 +116,13 @@ if (cluster.isPrimary) {
     console.clear();
     console.log(`${TXT.bold}${TXT.gold}
 ╔════════════════════════════════════════════════════════╗
-║   ⚡ APEX TITAN v65.7 | OMNISCIENT CLUSTER MERGE      ║
-║   MODE: FLASHBOTS + LEVIATHAN + TRIANGLE PROBES       ║
+║   ⚡ APEX TITAN v65.8 | OMNISCIENT CLUSTER MERGE      ║
+║   STATUS: STABILIZED | RESOLVED 200/HTTP ERROR        ║
 ╚════════════════════════════════════════════════════════╝${TXT.reset}`);
 
-    // Pre-flight check for placeholders
     const isMissingKeys = GLOBAL_CONFIG.NETWORKS.some(n => n.wss.includes("YOUR_KEY") || n.rpc.includes("YOUR_KEY"));
     if (isMissingKeys) {
-        console.log(`${TXT.red}${TXT.bold}[CRITICAL] Default 'YOUR_KEY' detected in configurations.${TXT.reset}`);
+        console.log(`${TXT.red}${TXT.bold}[CRITICAL] Default 'YOUR_KEY' detected.${TXT.reset}`);
         console.log(`${TXT.yellow}Please ensure ETH_RPC, ETH_WSS, and PRIVATE_KEY are set in .env${TXT.reset}\n`);
     }
 
@@ -131,7 +135,6 @@ if (cluster.isPrimary) {
         const worker = cluster.fork();
         workers.push(worker);
 
-        // IPC Messaging: Shared listeners alert strikers
         worker.on('message', (msg) => {
             if (msg.type === 'WHALE_SIGNAL') {
                 workers.forEach(w => { if (w.id !== worker.id) w.send(msg); });
@@ -172,12 +175,11 @@ async function initWorker(CHAIN) {
         return;
     }
 
-    // 1. HEALTH SERVER (v26.1)
     try {
         const server = http.createServer((req, res) => {
             if (req.url === '/status') {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ status: "ONLINE", role: ROLE, chain: CHAIN.name, mode: "v65.7" }));
+                res.end(JSON.stringify({ status: "ONLINE", role: ROLE, chain: CHAIN.name, mode: "v65.8" }));
             } else { res.writeHead(404); res.end(); }
         });
         server.on('error', () => {});
@@ -186,8 +188,9 @@ async function initWorker(CHAIN) {
 
     async function safeConnect() {
         try {
-            if (CHAIN.wss.includes("YOUR_KEY") || CHAIN.rpc.includes("YOUR_KEY")) {
-                console.error(`${TAG} ${TXT.red}AUTH FAILED: API key is placeholder.${TXT.reset}`);
+            // PROTOCOL VALIDATION: Prevent 200 "Unexpected Server Response"
+            if (!CHAIN.wss.startsWith("ws")) {
+                console.error(`${TAG} ${TXT.red}PROTOCOL ERROR: WSS URL must start with 'ws://' or 'wss://'. Detected: ${CHAIN.wss.substring(0, 8)}...${TXT.reset}`);
                 return;
             }
 
@@ -197,8 +200,12 @@ async function initWorker(CHAIN) {
             
             if (wsProvider) {
                 wsProvider.on('error', (e) => {
-                    if (e.message.includes("401")) console.error(`${TAG} ${TXT.red}Invalid API Key (401).${TXT.reset}`);
-                    else if (e.message.includes("429")) process.stdout.write(`${TXT.red}!${TXT.reset}`);
+                    const emsg = e.message || "";
+                    if (emsg.includes("200")) {
+                        console.error(`${TAG} ${TXT.red}WSS Handshake Failed: Server returned 200 (HTTP). Check URL!${TXT.reset}`);
+                    } else if (emsg.includes("429")) {
+                        process.stdout.write(`${TXT.red}!${TXT.reset}`);
+                    }
                 });
                 if (wsProvider.websocket) {
                     wsProvider.websocket.onclose = () => setTimeout(safeConnect, 60000);
@@ -208,7 +215,6 @@ async function initWorker(CHAIN) {
             const wallet = new Wallet(walletKey, provider);
             const priceFeed = new Contract(CHAIN.priceFeed, ["function latestRoundData() view returns (uint80,int256,uint256,uint80,uint80)"], provider);
 
-            // FLASHBOTS PROVIDER (v26.1)
             let fbProvider = null;
             if (CHAIN.type === "FLASHBOTS" && hasFlashbots) {
                 try {
@@ -231,7 +237,6 @@ async function initWorker(CHAIN) {
 
             console.log(`${TXT.green}✅ CORE ${cluster.worker.id} ${ROLE} SYNCED on ${TAG}${TXT.reset}`);
 
-            // --- IPC HANDLER ---
             process.on('message', async (msg) => {
                 if (msg.type === 'WHALE_SIGNAL' && msg.chainId === CHAIN.chainId && !isProcessing) {
                     isProcessing = true;
@@ -241,7 +246,6 @@ async function initWorker(CHAIN) {
             });
 
             if (IS_LISTENER && wsProvider) {
-                // MEMPOOL SNIPER
                 wsProvider.on("pending", async (txHash) => {
                     if (isProcessing) return;
                     try {
@@ -260,7 +264,6 @@ async function initWorker(CHAIN) {
                     } catch (err) {}
                 });
 
-                // LEVIATHAN LOG DECODER
                 const swapTopic = ethers.id("Swap(address,uint256,uint256,uint256,uint256,address)");
                 wsProvider.on({ topics: [swapTopic] }, async (log) => {
                     if (isProcessing) return;
@@ -277,9 +280,8 @@ async function initWorker(CHAIN) {
                     } catch (e) {}
                 });
 
-                // TRIANGLE VOLATILITY PROBE (v26.1 probabilistic)
                 setInterval(async () => {
-                    if (isProcessing || Math.random() < 0.9) return; 
+                    if (isProcessing || Math.random() < 0.95) return; 
                     isProcessing = true;
                     await strike(provider, wallet, fbProvider, apexIface, CHAIN, "0x...", "TRIANGLE_PROBE");
                     setTimeout(() => isProcessing = false, GLOBAL_CONFIG.RPC_COOLDOWN_MS);
@@ -311,7 +313,6 @@ async function strike(provider, wallet, fbProvider, iface, CHAIN, target, mode) 
         if (simulation && simulation !== "0x") {
             console.log(`\n${TXT.gold}🚀 [${mode}] PROFIT DETECTED. EXECUTING...${TXT.reset}`);
             
-            // v26.0 Bribe Optimization (15%)
             const aggressivePriority = feeData.maxPriorityFeePerGas + 
                 ((feeData.maxPriorityFeePerGas * GLOBAL_CONFIG.PRIORITY_BRIBE) / 100n);
 
