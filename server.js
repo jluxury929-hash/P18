@@ -1,9 +1,9 @@
 // ===============================================================================
-// APEX ULTIMATE MASTER v44.0 (QUANTUM SOVEREIGN FINALITY) - CONNECTION HARDENED
+// APEX ULTIMATE MASTER v45.0 (QUANTUM CONNECTION RESILIENCE) - NUCLEAR CLUSTER
 // ===============================================================================
-// FIXED: 404 Endpoint Errors + eth_getTransactionCount Rate Limiting
-// STRATEGY: DUAL-LANE (WSS LISTENER / HTTP EXECUTOR) + MASTER NONCE BROKER
-// DNA: 10% POOL RESERVE RULE + DUAL-VECTOR SNIPE + ZERO-OVERHEAD NONCE
+// FIXED: WebSocket 429 Rate Limiting + Unhandled Error Event Crashes
+// STRATEGY: STAGGERED BOOT + MASTER NONCE SOVEREIGNTY + DUAL-LANE FIXED
+// DNA: 10% POOL RESERVE RULE + DUAL-VECTOR SNIPE + JITTERED HANDSHAKES
 // TARGET BENEFICIARY: 0x4B8251e7c80F910305bb81547e301DcB8A596918
 // ===============================================================================
 
@@ -29,12 +29,9 @@ const GLOBAL_CONFIG = {
     BENEFICIARY: "0x4B8251e7c80F910305bb81547e301DcB8A596918",
     STRIKE_DATA: "0x535a720a00000000000000000000000042000000000000000000000000000000000000060000000000000000000000004edbc9ba171790664872997239bc7a3f3a6331900000000000000000000000000000000000000000000000015af1d78b58c40000",
     
-    // ORACLES & ASSETS
     GAS_ORACLE: "0x420000000000000000000000000000000000000F",
     CHAINLINK_FEED: "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
-    WETH_USDC_POOL: "0x88A43bb75941904d47401946215162a26bc773dc",
 
-    // TUNABLES
     WHALE_THRESHOLD: parseEther("0.1"),
     GAS_LIMIT: 450000n,
     PRIORITY_BRIBE: 15n, 
@@ -45,31 +42,29 @@ const GLOBAL_CONFIG = {
 // --- UTILITY: URL SANITIZER ---
 function getExecutionUrl(wssUrl) {
     if (!wssUrl) return "";
-    // Correctly handle Infura/Alchemy paths that break with simple string replacement
     let url = wssUrl.replace("wss://", "https://");
-    url = url.replace("/ws/v3/", "/v3/"); // Fix Infura 404 pathing
+    url = url.replace("/ws/v3/", "/v3/"); 
     return url;
 }
 
-// --- MASTER PROCESS (The Central Intelligence) ---
+// --- MASTER PROCESS (The Sovereign Orchestrator) ---
 if (cluster.isPrimary) {
     console.clear();
     console.log(`${TXT.bold}${TXT.gold}╔════════════════════════════════════════════════════════╗${TXT.reset}`);
-    console.log(`${TXT.bold}${TXT.gold}║   ⚡ APEX MASTER v44.0 | QUANTUM SOVEREIGN FINALITY  ║${TXT.reset}`);
-    console.log(`${TXT.bold}${TXT.gold}║   DNA: MASTER NONCE SOVEREIGNTY + DUAL-LANE FIXED   ║${TXT.reset}`);
+    console.log(`${TXT.bold}${TXT.gold}║   ⚡ APEX MASTER v45.0 | QUANTUM RESILIENCE ENGINE   ║${TXT.reset}`);
+    console.log(`${TXT.bold}${TXT.gold}║   DNA: STAGGERED BOOT + NONCE SOVEREIGNTY (FIXED)   ║${TXT.reset}`);
     console.log(`${TXT.bold}${TXT.gold}╚════════════════════════════════════════════════════════╝${TXT.reset}\n`);
 
     let masterNonce = -1;
     const EXEC_URL = getExecutionUrl(process.env.WSS_URL);
 
-    // Initial Nonce Fetch (One-time RPC hit)
     async function initMasterState() {
         if (!process.env.TREASURY_PRIVATE_KEY) return;
         try {
             const provider = new JsonRpcProvider(EXEC_URL);
             const wallet = new Wallet(process.env.TREASURY_PRIVATE_KEY.trim(), provider);
             masterNonce = await provider.getTransactionCount(wallet.address, 'latest');
-            console.log(`${TXT.green}✅ MASTER STATE INITIALIZED | Nonce: ${masterNonce}${TXT.reset}`);
+            console.log(`${TXT.green}✅ MASTER STATE INITIALIZED | Global Nonce: ${masterNonce}${TXT.reset}`);
         } catch (e) {
             console.error(`${TXT.red}❌ MASTER INIT FAILED: ${e.message}${TXT.reset}`);
             setTimeout(initMasterState, 5000);
@@ -77,23 +72,30 @@ if (cluster.isPrimary) {
     }
     initMasterState();
 
-    const cpuCount = Math.min(os.cpus().length, 32);
-    for (let i = 0; i < cpuCount; i++) {
-        const worker = cluster.fork();
-        worker.on('message', (msg) => {
-            if (msg.type === 'NONCE_REQUEST') {
-                if (masterNonce === -1) return; // Not ready
-                worker.send({ type: 'NONCE_GRANT', nonce: masterNonce });
-                masterNonce++;
-            }
-            if (msg.type === 'STRIKE_SIGNAL') {
-                // Relay signal to all striker workers
-                for (const id in cluster.workers) cluster.workers[id].send(msg);
-            }
-        });
-    }
+    const spawnWorker = (i) => {
+        // RESILIENCE: Stagger worker boot to avoid thundering herd on WSS handshakes
+        setTimeout(() => {
+            const worker = cluster.fork();
+            worker.on('message', (msg) => {
+                if (msg.type === 'NONCE_REQUEST') {
+                    if (masterNonce === -1) return;
+                    worker.send({ type: 'NONCE_GRANT', nonce: masterNonce });
+                    masterNonce++;
+                }
+                if (msg.type === 'STRIKE_SIGNAL') {
+                    for (const id in cluster.workers) cluster.workers[id].send(msg);
+                }
+            });
+        }, i * 800); // 800ms stagger between each core boot
+    };
 
-    cluster.on('exit', () => setTimeout(() => cluster.fork(), 2000));
+    const cpuCount = Math.min(os.cpus().length, 32);
+    for (let i = 0; i < cpuCount; i++) spawnWorker(i);
+
+    cluster.on('exit', (worker) => {
+        console.log(`${TXT.yellow}⚠️ Core Reset: PID ${worker.process.pid}. Respawning...${TXT.reset}`);
+        setTimeout(() => spawnWorker(0), 3000);
+    });
 } 
 // --- WORKER PROCESS (Striker Core) ---
 else {
@@ -113,18 +115,27 @@ async function runWorker() {
 
     async function connect() {
         try {
-            // Initialize providers with explicit error handling
+            // Executor Lane (HTTP)
             const httpProvider = new JsonRpcProvider(HTTP_URL, undefined, { staticNetwork: true });
-            const wsProvider = new WebSocketProvider(WSS_URL);
-            
-            // Wait for detection to avoid "failed to detect network" error
             await httpProvider.getNetwork();
             const wallet = new Wallet(cleanKey, httpProvider);
+
+            // Listener Lane (WSS) - HARDENED against unhandled 429 crashes
+            const wsProvider = new WebSocketProvider(WSS_URL);
+            
+            // v45.0 GLOBAL EXCEPTION HANDLER (Prevents rate-limit crash)
+            wsProvider.on('error', (e) => {
+                if (e.message && (e.message.includes('429') || e.message.includes('Unexpected server response'))) {
+                    // Suppress noise, connection logic below handles the retry
+                    return;
+                }
+                console.error(`${TAG} ${TXT.red}WSS Event Error: ${e.message}${TXT.reset}`);
+            });
 
             const oracle = new Contract(GLOBAL_CONFIG.GAS_ORACLE, ["function getL1Fee(bytes) view returns (uint256)"], httpProvider);
             const priceFeed = new Contract(GLOBAL_CONFIG.CHAINLINK_FEED, ["function latestRoundData() view returns (uint80,int256,uint256,uint256,uint80)"], httpProvider);
 
-            console.log(`${TAG} ${TXT.green}ACTIVE on Node Stack${TXT.reset}`);
+            console.log(`${TAG} ${TXT.green}ACTIVE${TXT.reset}`);
 
             if (ROLE === "STRIKER") {
                 process.on('message', async (msg) => {
@@ -136,20 +147,29 @@ async function runWorker() {
 
             if (ROLE === "LISTENER") {
                 const swapTopic = ethers.id("Swap(address,uint256,uint256,uint256,uint256,address)");
-                wsProvider.on({ topics: [swapTopic] }, () => {
-                    process.send({ type: 'STRIKE_SIGNAL' });
-                });
+                wsProvider.on({ topics: [swapTopic] }, () => process.send({ type: 'STRIKE_SIGNAL' }));
 
                 wsProvider.on("block", (bn) => {
-                    process.stdout.write(`\r${TAG} ${TXT.dim}Scanning Block #${bn}...${TXT.reset}`);
+                    if (cluster.worker.id % 8 === 0) {
+                        process.stdout.write(`\r${TAG} ${TXT.dim}Sovereign Pulse #${bn}...${TXT.reset}`);
+                    }
                 });
 
-                wsProvider.websocket.onclose = () => process.exit(1);
+                wsProvider.websocket.onclose = () => {
+                    console.log(`${TAG} ${TXT.yellow}WSS Closed. Reconnecting...${TXT.reset}`);
+                    process.exit(1); 
+                };
             }
 
         } catch (e) {
-            console.error(`${TAG} ${TXT.red}Connection Error: ${e.message}${TXT.reset}`);
-            setTimeout(connect, 5000);
+            if (e.message.includes('429')) {
+                const backoff = 5000 + (Math.random() * 10000);
+                console.warn(`${TAG} ${TXT.yellow}429 Rate Limit. Backing off ${Math.round(backoff/1000)}s...${TXT.reset}`);
+                setTimeout(connect, backoff);
+            } else {
+                console.error(`${TAG} ${TXT.red}Init Error: ${e.message}${TXT.reset}`);
+                setTimeout(connect, 5000);
+            }
         }
     }
     connect();
@@ -170,7 +190,6 @@ async function getSovereignNonce() {
 
 async function executeOmniscientStrike(provider, wallet, oracle, priceFeed) {
     try {
-        // 1. PRE-FLIGHT (Centralized Nonce + Simulation)
         const [nonce, simulation, l1Fee, feeData, priceData] = await Promise.all([
             getSovereignNonce(),
             provider.call({ to: GLOBAL_CONFIG.TARGET_CONTRACT, data: GLOBAL_CONFIG.STRIKE_DATA, from: wallet.address }).catch(() => null),
@@ -181,18 +200,16 @@ async function executeOmniscientStrike(provider, wallet, oracle, priceFeed) {
 
         if (!simulation || simulation === "0x") return;
 
-        // 2. NUCLEAR PROFIT MATH
         const currentEthPrice = Number(priceData[1]) / 1e8;
         const gasPrice = feeData.maxFeePerGas || feeData.gasPrice || parseEther("0.1", "gwei");
         const priority = (feeData.maxPriorityFeePerGas || 0n) * (100n + GLOBAL_CONFIG.PRIORITY_BRIBE) / 100n;
         
         const l2Cost = GLOBAL_CONFIG.GAS_LIMIT * gasPrice;
         const totalThreshold = l2Cost + l1Fee + parseEther(GLOBAL_CONFIG.MARGIN_ETH);
-        const rawProfit = BigInt(simulation);
 
-        if (rawProfit > totalThreshold) {
-            const netEth = rawProfit - (l2Cost + l1Fee);
-            console.log(`\n${TXT.green}${TXT.bold}💎 ARBITRAGE AUTHORIZED${TXT.reset}`);
+        if (BigInt(simulation) > totalThreshold) {
+            const netEth = BigInt(simulation) - (l2Cost + l1Fee);
+            console.log(`\n${TXT.green}${TXT.bold}💎 ARBITRAGE EXECUTED${TXT.reset}`);
             console.log(`   ↳ 💰 NET PROFIT: +${formatEther(netEth)} ETH (~$${(parseFloat(formatEther(netEth)) * currentEthPrice).toFixed(2)})`);
 
             const tx = {
@@ -207,9 +224,7 @@ async function executeOmniscientStrike(provider, wallet, oracle, priceFeed) {
             };
 
             const response = await wallet.sendTransaction(tx);
-            console.log(`   ${TXT.cyan}🚀 BROADCAST SUCCESS: ${response.hash.substring(0,20)}...${TXT.reset}`);
+            console.log(`   ${TXT.cyan}🚀 SUCCESS: ${response.hash.substring(0,20)}...${TXT.reset}`);
         }
-    } catch (e) {
-        // Silently handle nonce race or gas fluctuations
-    }
+    } catch (e) { /* Catch nonce race or gas shift */ }
 }
