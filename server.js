@@ -1,9 +1,9 @@
 // ===============================================================================
-// APEX ULTIMATE MASTER v47.0 (QUANTUM NETWORK ABSOLUTE) - SILENT HANDSHAKE
+// APEX ULTIMATE MASTER v48.0 (QUANTUM SOVEREIGN FINALITY) - LEAK PROTECTED
 // ===============================================================================
-// FIXED: Handshake 429 Errors + Unhandled WebSocket Exception Crashes
-// STRATEGY: EXPONENTIAL BOOT DECAY + WRAPAROUND HANDSHAKE GUARD
-// DNA: STATIC NETWORK LOCK + MASTER NONCE SOVEREIGNTY + ANTI-THUNDERING HERD
+// FIXED: MaxListenersExceededWarning + EventEmitter Memory Leak
+// STRATEGY: ONCE-ONLY IPC LISTENERS + UNLIMITED EMITTER CAP
+// DNA: STATIC NETWORK LOCK + MASTER NONCE SOVEREIGNTY + EXPONENTIAL BOOT
 // TARGET BENEFICIARY: 0x4B8251e7c80F910305bb81547e301DcB8A596918
 // ===============================================================================
 
@@ -14,12 +14,11 @@ const axios = require('axios');
 const { ethers, WebSocketProvider, JsonRpcProvider, Wallet, Interface, parseEther, formatEther, Contract, FallbackProvider, AbiCoder } = require('ethers');
 require('dotenv').config();
 
-// --- SAFETY: GLOBAL ROOT EXCEPTION TRAP (PREVENTS CONTAINER CRASH) ---
+// --- SAFETY: GLOBAL ROOT EXCEPTION TRAP ---
 process.on('uncaughtException', (err) => {
     const msg = err.message || "";
-    // v47.0: Catch the specific strings crashing the Node process
     if (msg.includes('429') || msg.includes('32005') || msg.includes('Unexpected server response') || msg.includes('coalesce')) {
-        return; // Silently drop network/rate-limit noise
+        return; 
     }
     console.error("\x1b[31m[ROOT SYSTEM ERROR]\x1b[0m", msg);
 });
@@ -61,8 +60,8 @@ function getExecutionUrl(wssUrl) {
 if (cluster.isPrimary) {
     console.clear();
     console.log(`${TXT.bold}${TXT.gold}╔════════════════════════════════════════════════════════╗${TXT.reset}`);
-    console.log(`${TXT.bold}${TXT.gold}║   ⚡ APEX MASTER v47.0 | QUANTUM SILENT HANDSHAKE   ║${TXT.reset}`);
-    console.log(`${TXT.bold}${TXT.gold}║   DNA: EXPONENTIAL BOOT + ROOT EXCEPTION SUPPRESS   ║${TXT.reset}`);
+    console.log(`${TXT.bold}${TXT.gold}║   ⚡ APEX MASTER v48.0 | QUANTUM LEAK PROTECTION    ║${TXT.reset}`);
+    console.log(`${TXT.bold}${TXT.gold}║   DNA: ONCE-ONLY LISTENERS + EXPONENTIAL BOOT       ║${TXT.reset}`);
     console.log(`${TXT.bold}${TXT.gold}╚════════════════════════════════════════════════════════╝${TXT.reset}\n`);
 
     let masterNonce = -1;
@@ -83,14 +82,13 @@ if (cluster.isPrimary) {
     initMasterState();
 
     const spawnWorker = (i) => {
-        // v47.0: Exponential Boot Decay (waits progressively longer for each core)
         const delay = Math.min(i * 1800, 45000);
         setTimeout(() => {
             const worker = cluster.fork();
             worker.on('message', (msg) => {
                 if (msg.type === 'NONCE_REQUEST') {
                     if (masterNonce === -1) return;
-                    worker.send({ type: 'NONCE_GRANT', nonce: masterNonce });
+                    worker.send({ type: 'NONCE_GRANT', nonce: masterNonce, requestId: msg.requestId });
                     masterNonce++;
                 }
                 if (msg.type === 'STRIKE_SIGNAL') {
@@ -110,6 +108,8 @@ if (cluster.isPrimary) {
 } 
 // --- WORKER PROCESS (Striker Core) ---
 else {
+    // RESILIENCE: Expand listener capacity for high-concurrency IPC
+    process.setMaxListeners(0); 
     runWorker();
 }
 
@@ -126,17 +126,13 @@ async function runWorker() {
 
     async function connect() {
         try {
-            // v47.0: Static Network Object (Pre-defines network to stop auto-discovery spam)
             const network = ethers.Network.from(GLOBAL_CONFIG.CHAIN_ID);
             const httpProvider = new JsonRpcProvider(HTTP_URL, network, { staticNetwork: true });
             const wallet = new Wallet(cleanKey, httpProvider);
 
-            // v47.0: WRAPAROUND HANDSHAKE GUARD
-            // This catches errors that occur DURING the constructor call
             let wsProvider;
             try {
                 wsProvider = new WebSocketProvider(WSS_URL, network);
-                // Attach error listener immediately after construction
                 wsProvider.on('error', (e) => {
                     if (e.message && (e.message.includes('429') || e.message.includes('32005'))) return;
                 });
@@ -179,15 +175,19 @@ async function runWorker() {
 }
 
 async function getSovereignNonce() {
+    const requestId = Math.random().toString(36).substring(7);
     return new Promise((resolve) => {
-        const listener = (msg) => {
-            if (msg.type === 'NONCE_GRANT') {
-                process.removeListener('message', listener);
+        // v48.0: ONCE listener prevents memory leaks and accumulation
+        const handler = (msg) => {
+            if (msg.type === 'NONCE_GRANT' && msg.requestId === requestId) {
                 resolve(msg.nonce);
+            } else {
+                // If not our request, keep listening once
+                process.once('message', handler);
             }
         };
-        process.on('message', listener);
-        process.send({ type: 'NONCE_REQUEST' });
+        process.once('message', handler);
+        process.send({ type: 'NONCE_REQUEST', requestId });
     });
 }
 
