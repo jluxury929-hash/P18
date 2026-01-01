@@ -1,9 +1,9 @@
 // ===============================================================================
-// APEX ULTIMATE MASTER v46.0 (QUANTUM NETWORK ABSOLUTE) - NUCLEAR CLUSTER
+// APEX ULTIMATE MASTER v47.0 (QUANTUM NETWORK ABSOLUTE) - SILENT HANDSHAKE
 // ===============================================================================
-// FIXED: Bootstrap Network Discovery Errors + Infura 429 Subscription Limit
-// STRATEGY: EXTENDED STAGGERED BOOT + STATIC NETWORK LOCK + MASTER NONCE
-// DNA: 10% POOL RESERVE RULE + DUAL-VECTOR SNIPE + JITTERED HANDSHAKES
+// FIXED: Handshake 429 Errors + Unhandled WebSocket Exception Crashes
+// STRATEGY: EXPONENTIAL BOOT DECAY + WRAPAROUND HANDSHAKE GUARD
+// DNA: STATIC NETWORK LOCK + MASTER NONCE SOVEREIGNTY + ANTI-THUNDERING HERD
 // TARGET BENEFICIARY: 0x4B8251e7c80F910305bb81547e301DcB8A596918
 // ===============================================================================
 
@@ -13,6 +13,16 @@ const http = require('http');
 const axios = require('axios');
 const { ethers, WebSocketProvider, JsonRpcProvider, Wallet, Interface, parseEther, formatEther, Contract, FallbackProvider, AbiCoder } = require('ethers');
 require('dotenv').config();
+
+// --- SAFETY: GLOBAL ROOT EXCEPTION TRAP (PREVENTS CONTAINER CRASH) ---
+process.on('uncaughtException', (err) => {
+    const msg = err.message || "";
+    // v47.0: Catch the specific strings crashing the Node process
+    if (msg.includes('429') || msg.includes('32005') || msg.includes('Unexpected server response') || msg.includes('coalesce')) {
+        return; // Silently drop network/rate-limit noise
+    }
+    console.error("\x1b[31m[ROOT SYSTEM ERROR]\x1b[0m", msg);
+});
 
 // --- THEME ENGINE ---
 const TXT = {
@@ -47,12 +57,12 @@ function getExecutionUrl(wssUrl) {
     return url;
 }
 
-// --- MASTER PROCESS (The Sovereign Orchestrator) ---
+// --- MASTER PROCESS (Sovereign Nonce Broker) ---
 if (cluster.isPrimary) {
     console.clear();
     console.log(`${TXT.bold}${TXT.gold}╔════════════════════════════════════════════════════════╗${TXT.reset}`);
-    console.log(`${TXT.bold}${TXT.gold}║   ⚡ APEX MASTER v46.0 | QUANTUM NETWORK ABSOLUTE    ║${TXT.reset}`);
-    console.log(`${TXT.bold}${TXT.gold}║   DNA: STATIC NETWORK LOCK + BOOTSTRAP RESILIENCE   ║${TXT.reset}`);
+    console.log(`${TXT.bold}${TXT.gold}║   ⚡ APEX MASTER v47.0 | QUANTUM SILENT HANDSHAKE   ║${TXT.reset}`);
+    console.log(`${TXT.bold}${TXT.gold}║   DNA: EXPONENTIAL BOOT + ROOT EXCEPTION SUPPRESS   ║${TXT.reset}`);
     console.log(`${TXT.bold}${TXT.gold}╚════════════════════════════════════════════════════════╝${TXT.reset}\n`);
 
     let masterNonce = -1;
@@ -61,20 +71,20 @@ if (cluster.isPrimary) {
     async function initMasterState() {
         if (!process.env.TREASURY_PRIVATE_KEY) return;
         try {
-            // Force chainId detection once to share with all workers
             const provider = new JsonRpcProvider(EXEC_URL, undefined, { staticNetwork: true });
             const wallet = new Wallet(process.env.TREASURY_PRIVATE_KEY.trim(), provider);
             masterNonce = await provider.getTransactionCount(wallet.address, 'latest');
             console.log(`${TXT.green}✅ MASTER STATE INITIALIZED | Global Nonce: ${masterNonce}${TXT.reset}`);
         } catch (e) {
             console.error(`${TXT.red}❌ MASTER INIT FAILED: ${e.message}${TXT.reset}`);
-            setTimeout(initMasterState, 10000);
+            setTimeout(initMasterState, 15000);
         }
     }
     initMasterState();
 
     const spawnWorker = (i) => {
-        // v46.0: Extended stagger to 1500ms to stop Infura 429s
+        // v47.0: Exponential Boot Decay (waits progressively longer for each core)
+        const delay = Math.min(i * 1800, 45000);
         setTimeout(() => {
             const worker = cluster.fork();
             worker.on('message', (msg) => {
@@ -87,26 +97,19 @@ if (cluster.isPrimary) {
                     for (const id in cluster.workers) cluster.workers[id].send(msg);
                 }
             });
-        }, i * 1500); 
+        }, delay); 
     };
 
     const cpuCount = Math.min(os.cpus().length, 32);
     for (let i = 0; i < cpuCount; i++) spawnWorker(i);
 
     cluster.on('exit', (worker) => {
-        console.log(`${TXT.yellow}⚠️ Core Reset: PID ${worker.process.pid}. Respawning...${TXT.reset}`);
-        setTimeout(() => spawnWorker(0), 5000);
+        console.log(`${TXT.yellow}⚠️ Core Reset: PID ${worker.process.pid}. Re-staggering...${TXT.reset}`);
+        setTimeout(() => spawnWorker(0), 10000);
     });
 } 
 // --- WORKER PROCESS (Striker Core) ---
 else {
-    // --- SAFETY: INTERNAL ERROR HANDLER ---
-    process.on('uncaughtException', (err) => {
-        const msg = err.message || "";
-        if (msg.includes('429') || msg.includes('32005') || msg.includes('coalesce') || msg.includes('discovery')) return;
-        console.error(`${TXT.red}[FATAL] Core ${cluster.worker.id}: ${msg}${TXT.reset}`);
-    });
-
     runWorker();
 }
 
@@ -123,17 +126,23 @@ async function runWorker() {
 
     async function connect() {
         try {
-            // v46.0: Static Network Lock (ChainId 8453) to bypass discovery overhead
+            // v47.0: Static Network Object (Pre-defines network to stop auto-discovery spam)
             const network = ethers.Network.from(GLOBAL_CONFIG.CHAIN_ID);
             const httpProvider = new JsonRpcProvider(HTTP_URL, network, { staticNetwork: true });
             const wallet = new Wallet(cleanKey, httpProvider);
 
-            // Listener Lane - Guarded against 429 unhandled events
-            const wsProvider = new WebSocketProvider(WSS_URL, network);
-            
-            wsProvider.on('error', (e) => {
-                if (e.message && (e.message.includes('429') || e.message.includes('32005'))) return;
-            });
+            // v47.0: WRAPAROUND HANDSHAKE GUARD
+            // This catches errors that occur DURING the constructor call
+            let wsProvider;
+            try {
+                wsProvider = new WebSocketProvider(WSS_URL, network);
+                // Attach error listener immediately after construction
+                wsProvider.on('error', (e) => {
+                    if (e.message && (e.message.includes('429') || e.message.includes('32005'))) return;
+                });
+            } catch (wsErr) {
+                throw new Error("Handshake Blocked (429)");
+            }
 
             const oracle = new Contract(GLOBAL_CONFIG.GAS_ORACLE, ["function getL1Fee(bytes) view returns (uint256)"], httpProvider);
             const priceFeed = new Contract(GLOBAL_CONFIG.CHAINLINK_FEED, ["function latestRoundData() view returns (uint80,int256,uint256,uint256,uint80)"], httpProvider);
@@ -153,14 +162,16 @@ async function runWorker() {
                 wsProvider.on({ topics: [swapTopic] }, () => process.send({ type: 'STRIKE_SIGNAL' }));
 
                 wsProvider.websocket.onclose = () => {
-                    setTimeout(() => process.exit(1), 2000); 
+                    setTimeout(() => process.exit(1), 1000); 
                 };
             }
 
         } catch (e) {
-            const isRateLimit = e.message.includes('429') || e.message.includes('32005');
-            const delay = isRateLimit ? 15000 + (Math.random() * 15000) : 5000;
-            if (isRateLimit) console.warn(`${TAG} ${TXT.yellow}Node saturated. Backing off...${TXT.reset}`);
+            const isRateLimit = e.message.includes('429') || e.message.includes('32005') || e.message.includes('Blocked');
+            const delay = isRateLimit ? 20000 + (Math.random() * 20000) : 5000;
+            if (isRateLimit && cluster.worker.id % 4 === 0) {
+                console.warn(`${TAG} ${TXT.yellow}Handshake limit. Silent cooldown: ${Math.round(delay/1000)}s...${TXT.reset}`);
+            }
             setTimeout(connect, delay);
         }
     }
@@ -200,7 +211,7 @@ async function executeOmniscientStrike(provider, wallet, oracle, priceFeed) {
 
         if (BigInt(simulation) > totalThreshold) {
             const netEth = BigInt(simulation) - ((GLOBAL_CONFIG.GAS_LIMIT * gasPrice) + l1Fee);
-            console.log(`\n${TXT.green}${TXT.bold}💎 ARBITRAGE STRIKE${TXT.reset} | Profit: +${formatEther(netEth)} ETH`);
+            console.log(`\n${TXT.green}${TXT.bold}💎 ARBITRAGE EXECUTED${TXT.reset} | Profit: +${formatEther(netEth)} ETH`);
 
             const tx = {
                 to: GLOBAL_CONFIG.TARGET_CONTRACT,
