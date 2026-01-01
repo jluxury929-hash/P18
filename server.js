@@ -1,27 +1,24 @@
 /**
  * ===============================================================================
- * APEX MASTER v48.2 (ADAPTIVE SINGULARITY) - FINAL REPAIR BUILD
+ * APEX MASTER v48.3 (SHADOW PROTOCOL) - BOOT-LOOP REPAIR BUILD
  * ===============================================================================
- * FIX: SEQUENTIAL HYDRATION | ERROR COALESCE TRAP | 429 HANDSHAKE GUARD
- * PROTECTION: 32-CORE STAGGERED CLUSTER | MULTI-RPC FALLBACK | L1 GAS AWARE
+ * FIX: COLD-START RPC ROTATION | MASTER BOOTSTRAP RECOVERY
+ * DNA: SEQUENTIAL HYDRATION + 429 HANDSHAKE GUARD + MULTI-RPC FALLBACK
  * ===============================================================================
  */
 const cluster = require('cluster');
 const os = require('os');
-const { ethers, JsonRpcProvider, Wallet, Contract, FallbackProvider, WebSocketProvider, parseEther, formatEther } = require('ethers');
+const { ethers, JsonRpcProvider, Wallet, Contract, FallbackProvider, WebSocketProvider, parseEther } = require('ethers');
 require('dotenv').config();
 
-// --- ROOT SAFETY: PREVENTS THE "COALESCE ERROR" CONTAINER CRASH ---
+// --- ROOT SAFETY: PREVENTS CONTAINER CRASH FROM RPC REJECTION ---
 process.on('uncaughtException', (err) => {
     const msg = err.message || "";
-    // v48.2: Silently drop internal provider errors and rate limits to keep container alive
-    if (msg.includes('429') || msg.includes('32005') || msg.includes('coalesce') || msg.includes('Too Many Requests')) {
-        return; 
-    }
+    if (msg.includes('429') || msg.includes('32005') || msg.includes('coalesce') || msg.includes('Too Many Requests')) return;
     console.error("\x1b[31m[CRITICAL ROOT ERROR]\x1b[0m", msg);
 });
 
-const TXT = { green: "\x1b[32m", yellow: "\x1b[33m", cyan: "\x1b[36m", gold: "\x1b[38;5;220m", reset: "\x1b[0m" };
+const TXT = { green: "\x1b[32m", yellow: "\x1b[33m", cyan: "\x1b[36m", gold: "\x1b[38;5;220m", reset: "\x1b[0m", red: "\x1b[31m" };
 
 const GLOBAL_CONFIG = {
     CHAIN_ID: 8453,
@@ -29,42 +26,54 @@ const GLOBAL_CONFIG = {
     BENEFICIARY: "0x4B8251e7c80F910305bb81547e301DcB8A596918",
     GAS_ORACLE: "0x420000000000000000000000000000000000000F",
     GAS_LIMIT: 450000n,
+    // LOAD BALANCER POOL (v48.3: Now used by Master for Cold-Start)
     RPC_POOL: [
-        "https://base.merkle.io", // High-performance private RPC
+        "https://base.merkle.io", 
         "https://1rpc.io/base",
         "https://mainnet.base.org",
-        "https://base.llamarpc.com"
+        "https://base.llamarpc.com",
+        "https://base-mainnet.public.blastapi.io"
     ]
 };
 
 if (cluster.isPrimary) {
     console.clear();
     console.log(`${TXT.gold}╔════════════════════════════════════════════════════════╗`);
-    console.log(`║   ⚡ APEX MASTER v48.2 | ADAPTIVE REPAIR ENGAGED     ║`);
-    console.log(`║   DNA: SEQUENTIAL HYDRATION + 429 HANDSHAKE GUARD   ║`);
+    console.log(`║   ⚡ APEX MASTER v48.3 | SHADOW RECOVERY ENGAGED     ║`);
+    console.log(`║   DNA: COLD-START ROTATION + MASTER AUTO-RECOVERY   ║`);
     console.log(`╚════════════════════════════════════════════════════════╝${TXT.reset}\n`);
 
     let masterNonce = -1;
     const network = ethers.Network.from(GLOBAL_CONFIG.CHAIN_ID);
 
     async function initMaster() {
-        try {
-            // Use 1RPC for bootstrap to avoid Infura/Alchemy limits
-            const provider = new JsonRpcProvider(GLOBAL_CONFIG.RPC_POOL[1], network, { staticNetwork: true });
-            const wallet = new Wallet(process.env.TREASURY_PRIVATE_KEY.trim(), provider);
-            masterNonce = await provider.getTransactionCount(wallet.address, 'latest');
-            console.log(`${TXT.green}✅ MASTER NONCE SYNCED: ${masterNonce}${TXT.reset}`);
-            
-            // v48.2: Sequential Cluster Hydration (Ensures only 1 core handshakes every 3 seconds)
-            const cpuCount = Math.min(os.cpus().length, 32);
-            for (let i = 0; i < cpuCount; i++) {
-                await new Promise(r => setTimeout(r, 3000)); 
-                cluster.fork();
+        // v48.3: Cold-Start Rotation Loop
+        for (const url of GLOBAL_CONFIG.RPC_POOL) {
+            try {
+                console.log(`${TXT.cyan}📡 Attempting Bootstrap via: ${new URL(url).hostname}...${TXT.reset}`);
+                const provider = new JsonRpcProvider(url, network, { staticNetwork: true });
+                const wallet = new Wallet(process.env.TREASURY_PRIVATE_KEY.trim(), provider);
+                
+                // Test connection with a simple call
+                masterNonce = await provider.getTransactionCount(wallet.address, 'latest');
+                
+                console.log(`${TXT.green}✅ BOOTSTRAP SUCCESSFUL VIA ${new URL(url).hostname}${TXT.reset}`);
+                console.log(`${TXT.green}✅ MASTER NONCE SYNCED: ${masterNonce}${TXT.reset}`);
+                
+                // Start sequential hydration only after successful bootstrap
+                const cpuCount = Math.min(os.cpus().length, 32);
+                for (let i = 0; i < cpuCount; i++) {
+                    await new Promise(r => setTimeout(r, 2500)); 
+                    cluster.fork();
+                }
+                return; // Exit boot loop on success
+            } catch (e) {
+                console.log(`${TXT.red}❌ RPC NODE REJECTED MASTER: ${new URL(url).hostname}${TXT.reset}`);
             }
-        } catch (e) {
-            console.log(`${TXT.yellow}⚠️ MASTER INIT FAILED. RETRYING IN 15S...${TXT.reset}`);
-            setTimeout(initMaster, 15000);
         }
+        
+        console.log(`${TXT.yellow}⚠️ ALL RPC NODES EXHAUSTED. SYSTEM COOL-DOWN: 30S...${TXT.reset}`);
+        setTimeout(initMaster, 30000);
     }
 
     cluster.on('message', (worker, msg) => {
@@ -81,35 +90,33 @@ if (cluster.isPrimary) {
 
     initMaster();
 } else {
+    // --- WORKER CORE ---
     runWorkerCore();
 }
 
 async function runWorkerCore() {
     const network = ethers.Network.from(GLOBAL_CONFIG.CHAIN_ID);
+    // Multi-RPC Fallback to prevent mid-operation 429 crashes
     const provider = new FallbackProvider(GLOBAL_CONFIG.RPC_POOL.map((url, i) => ({
         provider: new JsonRpcProvider(url, network, { staticNetwork: true }),
-        priority: i + 1,
-        stallTimeout: 1000
+        priority: i + 1, stallTimeout: 1200
     })), network, { quorum: 1 });
 
     const wallet = new Wallet(process.env.TREASURY_PRIVATE_KEY.trim(), provider);
     const l1Oracle = new Contract(GLOBAL_CONFIG.GAS_ORACLE, ["function getL1Fee(bytes) view returns (uint256)"], provider);
     
-    const ROLE = (cluster.worker.id % 4 === 0) ? "LISTENER" : "STRIKER";
-    const TAG = `${TXT.cyan}[CORE ${cluster.worker.id}-${ROLE}]${TXT.reset}`;
+    const isListener = (cluster.worker.id % 4 === 0);
+    const TAG = `${TXT.cyan}[CORE ${cluster.worker.id}]${TXT.reset}`;
 
-    if (ROLE === "LISTENER") {
+    if (isListener) {
         async function connectWs() {
             try {
                 const ws = new WebSocketProvider(process.env.WSS_URL, network);
-                // v48.2: Hardened Handshake Trap
-                ws.on('error', (e) => { if (e.message.includes('429')) return; });
+                ws.on('error', () => {}); 
                 ws.on('block', () => process.send({ type: 'SIGNAL' }));
-                console.log(`${TAG} Handshake Verified.`);
+                console.log(`${TAG} Listener Engaged.`);
             } catch (e) {
-                // Exponential Backoff for 429 recovery
-                const delay = 20000 + (Math.random() * 10000);
-                setTimeout(connectWs, delay);
+                setTimeout(connectWs, 20000);
             }
         }
         connectWs();
@@ -117,7 +124,6 @@ async function runWorkerCore() {
         process.on('message', async (msg) => {
             if (msg.type === 'STRIKE_CMD') await executeAtomicStrike(provider, wallet, l1Oracle, TAG);
         });
-        console.log(`${TAG} Striker Standby.`);
     }
 }
 
@@ -125,7 +131,7 @@ async function executeAtomicStrike(provider, wallet, l1Oracle, TAG) {
     try {
         const reqId = Math.random();
         const nonce = await new Promise((res, rej) => {
-            const timeout = setTimeout(() => rej("Nonce Timeout"), 2000);
+            const timeout = setTimeout(() => rej("Timeout"), 2000);
             const h = m => { if(m.id === reqId) { clearTimeout(timeout); process.removeListener('message', h); res(m.nonce); }};
             process.on('message', h);
             process.send({ type: 'NONCE_REQ', id: reqId });
@@ -138,24 +144,13 @@ async function executeAtomicStrike(provider, wallet, l1Oracle, TAG) {
             provider.getFeeData()
         ]);
 
-        if (sim === "0x" || BigInt(sim) === 0n) return;
+        if (sim === "0x") return;
 
         const gasPrice = feeData.maxFeePerGas || feeData.gasPrice;
-        const totalCost = (GLOBAL_CONFIG.GAS_LIMIT * gasPrice) + l1Fee;
-
-        if (BigInt(sim) > totalCost) {
-            const tx = {
-                to: GLOBAL_CONFIG.TARGET_CONTRACT,
-                data: data,
-                nonce: nonce,
-                gasLimit: GLOBAL_CONFIG.GAS_LIMIT,
-                maxFeePerGas: gasPrice + parseEther("2", "gwei"),
-                maxPriorityFeePerGas: parseEther("2", "gwei"),
-                type: 2,
-                chainId: 8453
-            };
+        if (BigInt(sim) > (GLOBAL_CONFIG.GAS_LIMIT * gasPrice) + l1Fee) {
+            const tx = { to: GLOBAL_CONFIG.TARGET_CONTRACT, data, nonce, gasLimit: GLOBAL_CONFIG.GAS_LIMIT, maxFeePerGas: gasPrice + parseEther("2", "gwei"), maxPriorityFeePerGas: parseEther("2", "gwei"), type: 2, chainId: 8453 };
             const res = await wallet.sendTransaction(tx);
-            console.log(`\n${TXT.green}🚀 STRIKE SUCCESS: ${res.hash.substring(0, 20)}...${TXT.reset}`);
+            console.log(`${TAG} 🚀 STRIKE SUCCESS: ${res.hash.substring(0, 15)}...`);
         }
     } catch (e) { }
 }
